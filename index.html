@@ -519,6 +519,9 @@ const $ = id => document.getElementById(id);
 // pathname "/" liefert einen leeren Slug, deshalb Prefix sauber ohne Trailing-Dash bauen.
 const _slug = location.pathname.replace(/[^a-z0-9]/gi,'').slice(0,10).toLowerCase();
 const APP_PREFIX = _slug ? 'looom-' + _slug : 'looom';
+// ROOM_HOST_ID vorziehen — die Boot-Routine kann synchron feuern, bevor
+// weiter unten liegende const-Deklarationen die TDZ verlassen.
+const ROOM_HOST_ID = () => APP_PREFIX + '-host-' + room;
 
 function toast(msg, ms=1800){
   const el = $('toast'); el.textContent = msg; el.classList.add('show');
@@ -605,7 +608,8 @@ $('startLinkBtn').addEventListener('click', () => {
   });
 });
 
-if(room){ ensureNick(() => { setRoom(room); enterRoom(); }); }
+// Auto-Enter bei Hash-URL: ans Script-Ende verschoben, damit alle
+// let/const-Deklarationen aus der TDZ raus sind, bevor bootPeer() feuert.
 
 function enterRoom(){
   $('startView').style.display = 'none';
@@ -963,8 +967,6 @@ async function flowControl(conn){
   return new Promise(r => setTimeout(r, 0));
 }
 
-const ROOM_HOST_ID = () => APP_PREFIX + '-host-' + room;
-
 function setupHost(){
   isHost = true;
   setStatus('Gastgeber · online', 'ok');
@@ -1083,6 +1085,10 @@ window.addEventListener('beforeunload', () => {
     if(fileBlobUrl){ try{ URL.revokeObjectURL(fileBlobUrl); }catch(_){} }
   }catch(_){}
 });
+
+// Letzter Schritt: Auto-Enter wenn die URL einen Raum-Hash trägt.
+// Hier ist der komplette Code deklariert, also keine TDZ-Falle mehr.
+if(room){ ensureNick(() => { setRoom(room); enterRoom(); }); }
 </script>
 </body>
 </html>
