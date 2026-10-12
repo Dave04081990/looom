@@ -515,7 +515,10 @@
 /* LOOOM – P2P-Sync für Datei-Upload und YouTube/Vimeo-Links. */
 
 const $ = id => document.getElementById(id);
-const APP_PREFIX = 'looom-' + location.pathname.replace(/[^a-z0-9]/gi,'').slice(0,10).toLowerCase();
+// Peer-IDs dürfen keine aufeinanderfolgenden Bindestriche enthalten.
+// pathname "/" liefert einen leeren Slug, deshalb Prefix sauber ohne Trailing-Dash bauen.
+const _slug = location.pathname.replace(/[^a-z0-9]/gi,'').slice(0,10).toLowerCase();
+const APP_PREFIX = _slug ? 'looom-' + _slug : 'looom';
 
 function toast(msg, ms=1800){
   const el = $('toast'); el.textContent = msg; el.classList.add('show');
