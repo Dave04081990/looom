@@ -296,12 +296,8 @@
   /* Status-Chip im Player war zu dominant – komplett ausgeblendet. */
   .player-overlay-status{display:none !important}
 
-  .xfer{
-    display:none;align-items:center;gap:10px;
-    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-lg);
-    padding:9px 12px;font-size:12.5px;color:var(--fg-dim);
-  }
-  .xfer.show{display:flex}
+  /* Transfer-Bar wird nicht mehr benötigt — ersetzt durch Live-Streaming. */
+  .xfer{display:none !important}
   .xfer .bar{flex:1;height:5px;background:#222;border-radius:999px;overflow:hidden}
   .xfer .bar>span{display:block;height:100%;background:var(--gold);width:0}
   .xfer b{color:var(--fg)}
@@ -539,19 +535,22 @@ function fmtBytes(b){
   return (b/1024/1024/1024).toFixed(2) + ' GB';
 }
 
+// Namen bewusst NICHT aus localStorage als "me" laden — immer frisch fragen.
+// Nur den letzten Namen als Vorschlag im Input vorbefüllen.
 let me = null;
-try{ me = JSON.parse(localStorage.getItem('looom.me')||'null'); }catch(_){}
+let _lastName = null;
+try{ _lastName = JSON.parse(localStorage.getItem('looom.lastName')||'null'); }catch(_){}
 
 function ensureNick(cb){
-  if(me && me.name){ cb(); return; }
+  if(me && me.name){ cb(); return; }   // nur innerhalb einer Session nicht erneut fragen
   const back = $('nickModal'); const input = $('nickInput');
-  back.classList.add('show'); setTimeout(()=> input.focus(), 50);
+  back.classList.add('show'); setTimeout(()=> { input.focus(); input.select(); }, 50);
   const NICKS = ['Falke','Nebel','Komet','Pixel','Rakete','Signal','Trubel','Vinyl','Zelt','Delta','Puls','Fjord','Nova','Kiwi','Tango','Mocca','Luke','Jana','Mika','Toni'];
-  input.value = NICKS[Math.floor(Math.random()*NICKS.length)];
+  input.value = _lastName || NICKS[Math.floor(Math.random()*NICKS.length)];
   const done = () => {
     const v = input.value.trim().slice(0,24) || 'Gast';
     me = { name: v };
-    try{ localStorage.setItem('looom.me', JSON.stringify(me)); }catch(_){}
+    try{ localStorage.setItem('looom.lastName', JSON.stringify(v)); }catch(_){}
     back.classList.remove('show');
     cb();
   };
@@ -734,22 +733,68 @@ function loadLinkSource(src, startAt, playNow){
   }
 }
 
+let hostStream = null; // Live-Stream vom Host-Video für Gäste
+
 function loadLocalFile(file, isHostOrigin){
   hideAllPlayers(); playerVid.hidden = false;
   setMode('Datei · ' + file.name);
-  overlayChip(isHostOrigin ? 'HOST · DATEI' : 'DATEI', 'gold');
+  overlayChip(isHostOrigin ? 'HOST · BEREIT' : 'DATEI', 'gold');
   if(fileBlobUrl){ try{ URL.revokeObjectURL(fileBlobUrl); }catch(_){} }
   fileBlobUrl = URL.createObjectURL(file);
+  playerVid.srcObject = null;
   playerVid.src = fileBlobUrl;
+  playerVid.muted = false;
+  playerVid.autoplay = false;
+  playerVid.preload = 'auto';
   attachVideoEvents(playerVid);
   current = {kind:'file', name:file.name, size:file.size, type:file.type};
   currentFileMeta = {...current};
+
+  // Sobald der erste Frame dekodiert ist, erzeugen wir einen MediaStream.
+  // Video bleibt pausiert — der Host startet selbst, wenn alle da sind.
+  playerVid.addEventListener('loadeddata', () => {
+    try{ playerVid.pause(); playerVid.currentTime = 0; }catch(_){}
+    try{
+      hostStream = playerVid.captureStream ? playerVid.captureStream()
+                : playerVid.mozCaptureStream ? playerVid.mozCaptureStream()
+                : null;
+    }catch(_){ hostStream = null; }
+    if(hostStream){
+      // alle schon verbundenen Peers anrufen — Stream ist offen, auch wenn
+      // das Video noch pausiert. Sobald der Host Play drückt, läuft Bild+Ton.
+      for(const peerId of peers.keys()){ callPeerWithStream(peerId); }
+    }
+    addMsg('', 'Video bereit. Lade jetzt deine Gäste ein — und drücke Play, wenn alle da sind.', true);
+  }, { once:true });
+}
+
+function callPeerWithStream(peerId){
+  if(!hostStream || !peer) return;
+  try{
+    const mc = peer.call(peerId, hostStream);
+    // optionale Fehlerbehandlung
+    mc && mc.on && mc.on('close', () => {});
+  }catch(_){}
 }
 
 function attachVideoEvents(v){
-  v.onplay  = () => { if(suppressNext){ suppressNext=false; return; } broadcast({t:'play', time:v.currentTime, at:Date.now()}); };
-  v.onpause = () => { if(suppressNext){ suppressNext=false; return; } broadcast({t:'pause', time:v.currentTime}); };
-  v.onseeked= () => { if(suppressNext){ suppressNext=false; return; } broadcast({t:'seek', time:v.currentTime}); };
+  // Bei Datei-Modus (Host-Stream) müssen Play/Pause/Seek NICHT gebroadcastet werden,
+  // weil der WebRTC-MediaStream selbst synchron läuft.
+  v.onplay  = () => {
+    if(suppressNext){ suppressNext=false; return; }
+    if(current?.kind === 'file' || current?.kind === 'stream') return;
+    broadcast({t:'play', time:v.currentTime, at:Date.now()});
+  };
+  v.onpause = () => {
+    if(suppressNext){ suppressNext=false; return; }
+    if(current?.kind === 'file' || current?.kind === 'stream') return;
+    broadcast({t:'pause', time:v.currentTime});
+  };
+  v.onseeked= () => {
+    if(suppressNext){ suppressNext=false; return; }
+    if(current?.kind === 'file' || current?.kind === 'stream') return;
+    broadcast({t:'seek', time:v.currentTime});
+  };
   v.ontimeupdate = () => { $('progressText').textContent = fmtTime(v.currentTime) + ' / ' + fmtTime(v.duration||0); };
 }
 
@@ -885,12 +930,23 @@ function handleMessage(m, conn){
         addMsg('', (m.from||'Gastgeber') + ' hat eine Quelle geladen.', true);
       }
       return;
-    case 'file-offer': beginFileReceive(m.meta); return;
-    case 'file-end':   finishFileReceive(); return;
-    case 'play':  syncSeekPlay((Number(m.time)||0) + (m.at ? (Date.now()-m.at)/1000 : 0), true); return;
-    case 'pause': syncSeekPlay(Number(m.time)||0, false); return;
-    case 'seek':  syncSeekPlay(Number(m.time)||0, null); return;
+    case 'stream-ready':
+      // Metadaten vom Host — der eigentliche MediaStream kommt gleich per peer.on('call')
+      setMode('Live · ' + (m.meta?.name || 'Stream'));
+      hideAllPlayers(); playerEmpty.hidden = false;
+      $('emptyText').textContent = 'Verbinde Live-Stream vom Gastgeber …';
+      return;
+    case 'play':
+      if(current?.kind === 'stream' || current?.kind === 'file') return; // Live-Stream synct selbst
+      syncSeekPlay((Number(m.time)||0) + (m.at ? (Date.now()-m.at)/1000 : 0), true); return;
+    case 'pause':
+      if(current?.kind === 'stream' || current?.kind === 'file') return;
+      syncSeekPlay(Number(m.time)||0, false); return;
+    case 'seek':
+      if(current?.kind === 'stream' || current?.kind === 'file') return;
+      syncSeekPlay(Number(m.time)||0, null); return;
     case 'heartbeat':
+      if(current?.kind === 'stream' || current?.kind === 'file') return;
       currentState().then(st => {
         if(!st) return;
         const target = (Number(m.time)||0) + (m.at ? (Date.now()-m.at)/1000 : 0);
@@ -978,9 +1034,12 @@ function setupHost(){
       refreshCount();
 
       if(current){
-        if(current.kind === 'file' && currentFileMeta && pendingFile){
-          await sendFileTo(conn, pendingFile);
-        }else if(current.kind !== 'file'){
+        if(current.kind === 'file'){
+          // Datei-Modus: Gast bekommt sofort einen Live-Stream per peer.call()
+          // Metadaten zuerst, damit der Gast die Modus-UI korrekt anzeigt.
+          try{ conn.send(JSON.stringify({t:'stream-ready', meta:{name:current.name}, from: me?.name})); }catch(_){}
+          if(hostStream){ callPeerWithStream(conn.peer); }
+        }else{
           const t = (await currentState())?.time || 0;
           try{ conn.send(JSON.stringify({t:'src', src: toSrcPayload(), time: t, from: me?.name})); }catch(_){}
         }
@@ -1020,16 +1079,42 @@ function connectAsClient(){
   });
   hostConn.on('data', d => {
     if(typeof d === 'string'){ applyPacket(d, null); }
-    else{ appendChunk(d instanceof ArrayBuffer ? d : d.buffer || d); }
   });
   hostConn.on('close', () => {
     setStatus('Gastgeber weg', 'err');
     hostConn = null; refreshCount();
-    addMsg('', 'Verbindung zum Gastgeber verloren — versuche, selbst zu übernehmen …', true);
-    try{ peer.destroy(); }catch(_){}
-    setTimeout(bootPeer, 500);
+    addMsg('', 'Verbindung zum Gastgeber verloren.', true);
+    // Wir übernehmen NICHT automatisch, weil der Stream weg wäre.
   });
   hostConn.on('error', () => {});
+
+  // Eingehender Media-Call vom Gastgeber: Live-Stream der Datei annehmen.
+  peer.on('call', (mc) => {
+    mc.answer(); // kein eigener Stream vom Gast zurück
+    mc.on('stream', (remote) => {
+      hideAllPlayers(); playerVid.hidden = false;
+      setMode('Live vom Gastgeber');
+      overlayChip('LIVE', 'gold');
+      playerVid.srcObject = remote;
+      playerVid.src = '';
+      playerVid.muted = true;      // Autoplay-Policy: stumm ist erlaubt
+      playerVid.play().catch(() => {});
+      current = {kind:'stream'};
+      addMsg('', 'Stream läuft stumm. Klicke aufs Video, um den Ton zu aktivieren.', true);
+      playerVid.addEventListener('click', () => {
+        playerVid.muted = false;
+        playerVid.play().catch(() => {});
+      }, { once:true });
+    });
+    mc.on('close', () => { if(current && current.kind === 'stream') showEmptyMsg('Stream beendet.'); });
+    mc.on('error', () => {});
+  });
+}
+
+function showEmptyMsg(txt){
+  hideAllPlayers();
+  playerEmpty.hidden = false;
+  $('emptyText').textContent = txt;
 }
 
 function bootPeer(){
