@@ -296,6 +296,27 @@
   /* Status-Chip im Player war zu dominant – komplett ausgeblendet. */
   .player-overlay-status{display:none !important}
 
+  /* Minimale Steuerleiste für den Gast — nur Ton und Vollbild. */
+  .guest-controls{
+    position:absolute;left:0;right:0;bottom:0;z-index:3;
+    display:none;align-items:center;justify-content:flex-end;gap:4px;
+    padding:10px 12px;
+    background:linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,0));
+    pointer-events:none;
+  }
+  .guest-controls.show{display:flex}
+  .guest-controls button{
+    pointer-events:auto;
+    display:inline-flex;align-items:center;justify-content:center;
+    width:38px;height:38px;border-radius:999px;
+    background:rgba(10,10,10,.6);border:1px solid rgba(255,255,255,.15);
+    color:#fff;cursor:pointer;
+    transition:background .15s, border-color .15s;
+    backdrop-filter: blur(6px);
+  }
+  .guest-controls button:hover{background:rgba(10,10,10,.85);border-color:var(--gold)}
+  .guest-controls button svg{width:18px;height:18px;display:block}
+
   /* Transfer-Bar wird nicht mehr benötigt — ersetzt durch Live-Streaming. */
   .xfer{display:none !important}
   .xfer .bar{flex:1;height:5px;background:#222;border-radius:999px;overflow:hidden}
@@ -455,6 +476,21 @@
           <div id="player-yt" hidden></div>
           <iframe id="player-vimeo" hidden allow="autoplay; fullscreen; picture-in-picture" frameborder="0"></iframe>
           <video id="player-video" hidden playsinline controls preload="auto"></video>
+          <div class="guest-controls" id="guestControls">
+            <button id="gcMute" title="Ton an/aus" aria-label="Ton an/aus">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path id="gcMuteIcon" d="M11 5 6 9H2v6h4l5 4V5z"/>
+                <path id="gcVolOn"  d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                <line id="gcVolOff" x1="23" y1="9" x2="17" y2="15" style="display:none"/>
+                <line id="gcVolOff2" x1="17" y1="9" x2="23" y2="15" style="display:none"/>
+              </svg>
+            </button>
+            <button id="gcFull" title="Vollbild" aria-label="Vollbild">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"/>
+              </svg>
+            </button>
+          </div>
           <div class="player-overlay-status" id="overlayStatus"></div>
         </div>
 
@@ -467,7 +503,6 @@
         <div class="player-controls">
           <span class="mode-pill">Modus · <b id="modeLabel">—</b></span>
           <span class="progress" id="progressText">00:00 / 00:00</span>
-          <button class="btn sm" id="syncBtn" title="Zum Gastgeber springen">Sync</button>
         </div>
       </div>
 
@@ -745,7 +780,9 @@ function loadLocalFile(file, isHostOrigin){
   playerVid.src = fileBlobUrl;
   playerVid.muted = false;
   playerVid.autoplay = false;
+  playerVid.controls = true;      // Host hat volle Kontrolle
   playerVid.preload = 'auto';
+  hideGuestControls();
   attachVideoEvents(playerVid);
   current = {kind:'file', name:file.name, size:file.size, type:file.type};
   currentFileMeta = {...current};
@@ -883,7 +920,40 @@ async function syncSeekPlay(t, play){
   }
 }
 
-$('syncBtn').addEventListener('click', () => broadcast({t:'resync-request'}));
+// Sync-Button entfernt — Live-Stream synchronisiert automatisch.
+
+// --- Guest-Controls (nur Ton + Vollbild) ---------------------------------
+function showGuestControls(){
+  playerVid.controls = false;
+  $('guestControls').classList.add('show');
+  updateMuteIcon();
+}
+function hideGuestControls(){
+  $('guestControls').classList.remove('show');
+}
+function updateMuteIcon(){
+  const on  = $('gcVolOn'),  off1 = $('gcVolOff'), off2 = $('gcVolOff2');
+  if(playerVid.muted){
+    on.style.display  = 'none';
+    off1.style.display = ''; off2.style.display = '';
+  }else{
+    on.style.display  = '';
+    off1.style.display = 'none'; off2.style.display = 'none';
+  }
+}
+$('gcMute').addEventListener('click', (e) => {
+  e.stopPropagation();
+  playerVid.muted = !playerVid.muted;
+  if(!playerVid.muted){ playerVid.play().catch(()=>{}); }
+  updateMuteIcon();
+});
+$('gcFull').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const el = $('playerWrap');
+  if(document.fullscreenElement){ document.exitFullscreen && document.exitFullscreen(); }
+  else { (el.requestFullscreen || el.webkitRequestFullscreen).call(el); }
+});
+playerVid.addEventListener('volumechange', updateMuteIcon);
 
 let peer=null, isHost=false, hostConn=null;
 const peers = new Map();
@@ -1097,13 +1167,26 @@ function connectAsClient(){
       overlayChip('LIVE', 'gold');
       playerVid.srcObject = remote;
       playerVid.src = '';
-      playerVid.muted = true;      // Autoplay-Policy: stumm ist erlaubt
-      playerVid.play().catch(() => {});
+      playerVid.autoplay = true;
       current = {kind:'stream'};
-      addMsg('', 'Stream läuft stumm. Klicke aufs Video, um den Ton zu aktivieren.', true);
-      playerVid.addEventListener('click', () => {
-        playerVid.muted = false;
+      showGuestControls(); // native Controls aus, nur Ton + Vollbild
+
+      // Erst mit Ton versuchen — klappt nur, wenn der Browser es erlaubt
+      // (meist nach einer Nutzerinteraktion wie dem Nickname-Klick).
+      playerVid.muted = false;
+      playerVid.play().then(() => {
+        updateMuteIcon();
+      }).catch(() => {
+        // Fallback: stumm starten, Nutzer muss den Ton selbst aktivieren.
+        playerVid.muted = true;
         playerVid.play().catch(() => {});
+        updateMuteIcon();
+        addMsg('', 'Dein Browser hat Ton beim Autostart blockiert — klicke das Lautsprecher-Symbol unten im Video, um ihn zu aktivieren.', true);
+      });
+
+      // Einmal auf das Video klicken reaktiviert Audio zusätzlich zur Steuerleiste.
+      playerVid.addEventListener('click', () => {
+        if(playerVid.muted){ playerVid.muted = false; playerVid.play().catch(()=>{}); updateMuteIcon(); }
       }, { once:true });
     });
     mc.on('close', () => { if(current && current.kind === 'stream') showEmptyMsg('Stream beendet.'); });
