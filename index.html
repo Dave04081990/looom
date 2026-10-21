@@ -296,26 +296,53 @@
   /* Status-Chip im Player war zu dominant – komplett ausgeblendet. */
   .player-overlay-status{display:none !important}
 
-  /* Minimale Steuerleiste für den Gast — nur Ton und Vollbild. */
-  .guest-controls{
-    position:absolute;left:0;right:0;bottom:0;z-index:3;
-    display:none;align-items:center;justify-content:flex-end;gap:4px;
+  /* Die alte Overlay-Steuerleiste bleibt im Code als no-op; die eigentliche Steuerung
+     sitzt jetzt unten in .player-bar. */
+  .guest-controls{display:none !important}
+
+  /* --- Haupt-Steuerleiste außerhalb des Players ------------------------- */
+  .player-bar{
+    display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-lg);
     padding:10px 12px;
-    background:linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,0));
-    pointer-events:none;
   }
-  .guest-controls.show{display:flex}
-  .guest-controls button{
-    pointer-events:auto;
+  .player-bar .pb-btn{
     display:inline-flex;align-items:center;justify-content:center;
-    width:38px;height:38px;border-radius:999px;
-    background:rgba(10,10,10,.6);border:1px solid rgba(255,255,255,.15);
-    color:#fff;cursor:pointer;
-    transition:background .15s, border-color .15s;
-    backdrop-filter: blur(6px);
+    width:40px;height:40px;border-radius:999px;
+    background:var(--panel-2);border:1px solid var(--line);
+    color:var(--fg);cursor:pointer;flex:none;
+    transition:background .15s, border-color .15s, color .15s, opacity .15s;
   }
-  .guest-controls button:hover{background:rgba(10,10,10,.85);border-color:var(--gold)}
-  .guest-controls button svg{width:18px;height:18px;display:block}
+  .player-bar .pb-btn:hover:not([disabled]){background:#232732;border-color:var(--gold-soft)}
+  .player-bar .pb-btn.active{background:var(--gold);color:var(--gold-ink);border-color:var(--gold)}
+  .player-bar .pb-btn[disabled]{opacity:.35;cursor:not-allowed}
+  .player-bar .pb-btn svg{width:18px;height:18px;display:block}
+  .player-bar .pb-spacer{flex:1}
+  .host-only{display:none !important}
+  body.is-host .host-only{display:inline-flex !important}
+
+  /* Kino-Modus: Chat ausblenden, Player auf volle Breite */
+  .room.cinema .playspace{grid-template-columns:1fr}
+  .room.cinema .chat{display:none}
+  .room.cinema .sharebar{display:none}
+
+  /* Chat-Toggle (unabhängig von Kino-Modus) */
+  .room.chat-off .playspace{grid-template-columns:1fr}
+  .room.chat-off .chat{display:none}
+
+  /* Vollbild: playspace füllt den Bildschirm. Steuerleiste + Timeline bleiben sichtbar.
+     Chat sitzt wie gewohnt rechts; über den Chat-Button kann er zugeklappt werden. */
+  .playspace:fullscreen{
+    background:var(--bg);
+    padding:12px 16px;
+    gap:12px;
+    grid-template-rows:1fr;
+    width:100vw;height:100vh;
+    overflow:hidden;
+  }
+  .playspace:-webkit-full-screen{
+    background:var(--bg);padding:12px 16px;width:100vw;height:100vh;
+  }
 
   /* Transfer-Bar wird nicht mehr benötigt — ersetzt durch Live-Streaming. */
   .xfer{display:none !important}
@@ -584,6 +611,40 @@
         <div class="player-controls">
           <span class="mode-pill">Modus · <b id="modeLabel">—</b></span>
           <span class="progress" id="progressText">00:00 / 00:00</span>
+        </div>
+
+        <div class="player-bar" id="playerBar">
+          <button class="pb-btn" id="pbPlay" title="Play / Pause" aria-label="Play / Pause">
+            <svg viewBox="0 0 24 24" fill="currentColor"><g id="pbPlayIcon"><polygon points="7,5 20,12 7,19"/></g><g id="pbPauseIcon" style="display:none"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></g></svg>
+          </button>
+          <button class="pb-btn" id="pbMute" title="Ton an/aus" aria-label="Ton an/aus">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 5 6 9H2v6h4l5 4V5z"/>
+              <path id="pbVolOn"  d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
+              <line id="pbVolOff1" x1="23" y1="9" x2="17" y2="15" style="display:none"/>
+              <line id="pbVolOff2" x1="17" y1="9" x2="23" y2="15" style="display:none"/>
+            </svg>
+          </button>
+          <button class="pb-btn" id="pbCC" title="Untertitel" aria-label="Untertitel">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5h18a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zm3 7a2 2 0 0 1 2-2h2v2H8v2h2v2H8a2 2 0 0 1-2-2v-2zm8 0a2 2 0 0 1 2-2h2v2h-2v2h2v2h-2a2 2 0 0 1-2-2v-2z"/></svg>
+          </button>
+          <button class="pb-btn host-only" id="pbGrant" title="Gästen Play/Pause erlauben" aria-label="Gäste-Steuerung">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17 11V7a5 5 0 0 0-10 0v4"/><rect x="4" y="11" width="16" height="10" rx="2"/>
+            </svg>
+          </button>
+          <div class="pb-spacer"></div>
+          <button class="pb-btn" id="pbChat" title="Chat ein-/ausblenden" aria-label="Chat ein-/ausblenden">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H8l-5 4V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+          </button>
+          <button class="pb-btn" id="pbCinema" title="Kino-Modus" aria-label="Kino-Modus">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="1"/></svg>
+          </button>
+          <button class="pb-btn" id="pbFull" title="Vollbild" aria-label="Vollbild">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"/></svg>
+          </button>
         </div>
 
         <div class="timeline-wrap">
@@ -1202,38 +1263,154 @@ function saveComment(){
   toast('Kommentar bei ' + fmtTime(marker.time) + ' gesetzt');
 }
 
-// --- Guest-Controls (nur Ton + Vollbild) ---------------------------------
-function showGuestControls(){
-  playerVid.controls = false;
-  $('guestControls').classList.add('show');
-  updateMuteIcon();
+// Dummy-Funktionen für Rückwärts-Kompatibilität der alten Overlay-Logik.
+function showGuestControls(){ playerVid.controls = false; }
+function hideGuestControls(){ /* nichts — die Overlay-Leiste gibt es nicht mehr */ }
+
+/* =========================================================================
+   Haupt-Steuerleiste außerhalb des Players
+   - Play/Pause: beim Host immer aktiv; beim Gast disabled, bis Host Freigabe erteilt
+   - Ton, Untertitel, Kino-Modus, Vollbild: für alle immer aktiv
+   ========================================================================= */
+let _guestsCanControl = false; // Host-Toggle: dürfen Gäste Play/Pause steuern?
+let _ccOn = false;             // UI-State für Untertitel-Toggle
+
+function isPlaying(){
+  if(current?.kind === 'yt' && ytReady){ try{ return yt.getPlayerState() === YT.PlayerState.PLAYING; }catch(_){} }
+  if(current?.kind === 'vimeo' && vim){ /* synchron nicht erfragbar; aus Fluss ableiten */ }
+  if(playerVid){ return !playerVid.paused && !playerVid.ended; }
+  return false;
 }
-function hideGuestControls(){
-  $('guestControls').classList.remove('show');
+function isMuted(){
+  if(current?.kind === 'yt' && ytReady){ try{ return !!yt.isMuted(); }catch(_){} }
+  if(playerVid){ return !!playerVid.muted; }
+  return false;
 }
-function updateMuteIcon(){
-  const on  = $('gcVolOn'),  off1 = $('gcVolOff'), off2 = $('gcVolOff2');
-  if(playerVid.muted){
-    on.style.display  = 'none';
-    off1.style.display = ''; off2.style.display = '';
-  }else{
-    on.style.display  = '';
-    off1.style.display = 'none'; off2.style.display = 'none';
+
+function updatePbPlayIcon(){
+  const playing = isPlaying();
+  $('pbPlayIcon').style.display  = playing ? 'none' : '';
+  $('pbPauseIcon').style.display = playing ? '' : 'none';
+}
+function updatePbMuteIcon(){
+  const muted = isMuted();
+  $('pbVolOn').style.display   = muted ? 'none' : '';
+  $('pbVolOff1').style.display = muted ? '' : 'none';
+  $('pbVolOff2').style.display = muted ? '' : 'none';
+}
+function updatePlayButtonState(){
+  // Beim Live-Stream kann der Gast nichts steuern — der Stream synct selbst
+  const guestOnStream = !isHost && current?.kind === 'stream';
+  const canPlay = isHost || (_guestsCanControl && !guestOnStream);
+  $('pbPlay').disabled = !canPlay;
+  updatePbPlayIcon();
+}
+setInterval(() => { updatePbPlayIcon(); updatePbMuteIcon(); }, 500);
+
+// --- Play / Pause ---------------------------------------------------------
+$('pbPlay').addEventListener('click', () => {
+  if($('pbPlay').disabled) return;
+  if(current?.kind === 'yt' && ytReady){
+    isPlaying() ? yt.pauseVideo() : yt.playVideo();
+  }else if(current?.kind === 'vimeo' && vim){
+    vim.getPaused().then(p => p ? vim.play() : vim.pause()).catch(()=>{});
+  }else if(playerVid){
+    if(playerVid.paused) playerVid.play().catch(()=>{}); else playerVid.pause();
   }
-}
-$('gcMute').addEventListener('click', (e) => {
-  e.stopPropagation();
-  playerVid.muted = !playerVid.muted;
-  if(!playerVid.muted){ playerVid.play().catch(()=>{}); }
-  updateMuteIcon();
+  setTimeout(updatePbPlayIcon, 100);
 });
-$('gcFull').addEventListener('click', (e) => {
-  e.stopPropagation();
-  const el = $('playerWrap');
-  if(document.fullscreenElement){ document.exitFullscreen && document.exitFullscreen(); }
-  else { (el.requestFullscreen || el.webkitRequestFullscreen).call(el); }
+
+// --- Ton -----------------------------------------------------------------
+$('pbMute').addEventListener('click', () => {
+  if(current?.kind === 'yt' && ytReady){
+    isMuted() ? yt.unMute() : yt.mute();
+  }else if(current?.kind === 'vimeo' && vim){
+    vim.getMuted().then(m => vim.setMuted(!m)).catch(()=>{});
+  }else if(playerVid){
+    playerVid.muted = !playerVid.muted;
+    if(!playerVid.muted) playerVid.play().catch(()=>{});
+  }
+  setTimeout(updatePbMuteIcon, 100);
 });
-playerVid.addEventListener('volumechange', updateMuteIcon);
+
+// --- Untertitel ----------------------------------------------------------
+$('pbCC').addEventListener('click', () => {
+  _ccOn = !_ccOn;
+  $('pbCC').classList.toggle('active', _ccOn);
+  if(current?.kind === 'yt' && ytReady){
+    try{
+      yt.loadModule && yt.loadModule('captions');
+      if(_ccOn){
+        const list = yt.getOption('captions', 'tracklist') || [];
+        if(list.length) yt.setOption('captions', 'track', list[0]);
+        else toast('Dieses Video hat keine Untertitel.');
+      }else{
+        yt.setOption('captions', 'track', {});
+      }
+    }catch(_){ toast('Untertitel-Toggle fehlgeschlagen.'); }
+  }else if(current?.kind === 'vimeo' && vim){
+    vim.getTextTracks().then(tracks => {
+      if(_ccOn){
+        if(tracks.length){ vim.enableTextTrack(tracks[0].language).catch(()=>{}); }
+        else toast('Dieses Video hat keine Untertitel.');
+      }else{
+        vim.disableTextTrack().catch(()=>{});
+      }
+    }).catch(()=>{});
+  }else{
+    _ccOn = false;
+    $('pbCC').classList.remove('active');
+    toast('Untertitel sind für MP4-Dateien ohne .vtt nicht verfügbar.');
+  }
+});
+
+// --- Gäste-Steuerung freigeben (Host-only) --------------------------------
+$('pbGrant').addEventListener('click', () => {
+  if(!isHost) return;
+  _guestsCanControl = !_guestsCanControl;
+  $('pbGrant').classList.toggle('active', _guestsCanControl);
+  broadcast({t:'guest-control', allow:_guestsCanControl});
+  toast(_guestsCanControl
+    ? 'Gäste dürfen jetzt Play/Pause steuern.'
+    : 'Gäste-Steuerung deaktiviert.');
+});
+
+// --- Kino-Modus ----------------------------------------------------------
+$('pbCinema').addEventListener('click', () => {
+  const room = $('roomView');
+  const on = !room.classList.contains('cinema');
+  room.classList.toggle('cinema', on);
+  $('pbCinema').classList.toggle('active', on);
+});
+
+// --- Vollbild ------------------------------------------------------------
+$('pbFull').addEventListener('click', () => {
+  // Target ist die ganze Player-Spalte, damit Steuerleiste + Timeline sichtbar bleiben
+  const el = document.querySelector('.playspace');
+  if(document.fullscreenElement){
+    document.exitFullscreen && document.exitFullscreen();
+  }else if(el){
+    const req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+    if(req) req.call(el);
+  }
+});
+document.addEventListener('fullscreenchange', () => {
+  $('pbFull').classList.toggle('active', !!document.fullscreenElement);
+});
+
+// --- Chat ein-/ausklappen -------------------------------------------------
+$('pbChat').addEventListener('click', () => {
+  const room = $('roomView');
+  const off = !room.classList.contains('chat-off');
+  room.classList.toggle('chat-off', off);
+  $('pbChat').classList.toggle('active', !off); // "aktiv" = Chat ist AN
+});
+// initial: Chat an → Button nicht active, aber auch nicht ausgegraut
+$('pbChat').classList.add('active');
+
+// Initialer Button-Zustand
+updatePlayButtonState();
+updatePbMuteIcon();
 
 let peer=null, isHost=false, hostConn=null;
 const peers = new Map();
@@ -1297,6 +1474,16 @@ function handleMessage(m, conn){
       if(m.marker && !markers.find(x => x.id === m.marker.id)){
         markers.push(m.marker);
         renderMarkers();
+      }
+      return;
+
+    case 'guest-control':
+      _guestsCanControl = !!m.allow;
+      updatePlayButtonState();
+      if(!isHost){
+        addMsg('', _guestsCanControl
+          ? 'Der Gastgeber hat Play/Pause für Gäste freigegeben.'
+          : 'Der Gastgeber hat die Gäste-Steuerung deaktiviert.', true);
       }
       return;
 
@@ -1398,8 +1585,10 @@ async function flowControl(conn){
 
 function setupHost(){
   isHost = true;
+  document.body.classList.add('is-host');
   setStatus('Gastgeber · online', 'ok');
   addMsg('', 'Du hast den Raum eröffnet.', true);
+  updatePlayButtonState();
 
   peer.on('connection', async (conn) => {
     conn.on('open', async () => {
@@ -1477,7 +1666,8 @@ function connectAsClient(){
       playerVid.src = '';
       playerVid.autoplay = true;
       current = {kind:'stream'};
-      showGuestControls(); // native Controls aus, nur Ton + Vollbild
+      playerVid.controls = false;
+      updatePlayButtonState();
 
       // A/V-Sync verbessern: Jitter-Buffer am Receiver vergrößern.
       // Dadurch bekommt die Pipeline etwas Luft, um Audio+Video zu synchronisieren.
