@@ -740,7 +740,7 @@ $('startLinkBtn').addEventListener('click', () => {
   ensureNick(() => {
     setRoom(freshRoom());
     enterRoom();
-    loadLinkSource(parsed, 0, false);
+    loadLinkSource(parsed, 0, false, true); // asHost = true
     broadcast({t:'src', src:parsed, time:0});
   });
 });
@@ -825,7 +825,11 @@ function loadYtApi(cb){
   document.head.appendChild(s);
 }
 
-function loadLinkSource(src, startAt, playNow){
+function loadLinkSource(src, startAt, playNow, asHost){
+  // asHost: true wenn ICH diese Quelle starte (= künftiger Host),
+  //         false wenn ich sie von einem anderen Peer empfange (= Gast).
+  const canControl = !!asHost;
+
   if(src.kind === 'yt'){
     hideAllPlayers(); playerYt.hidden = false;
     setMode('YouTube'); overlayChip('YOUTUBE', 'gold');
@@ -836,7 +840,12 @@ function loadLinkSource(src, startAt, playNow){
       yt = new YT.Player('player-yt', {
         width:'100%', height:'100%',
         videoId: src.id,
-        playerVars:{ playsinline:1, modestbranding:1, rel:0, autoplay: playNow?1:0, start: Math.floor(startAt||0) },
+        playerVars:{
+          playsinline:1, modestbranding:1, rel:0,
+          autoplay: playNow?1:0, start: Math.floor(startAt||0),
+          controls: canControl ? 1 : 0,   // Gast sieht keine YouTube-Controls
+          disablekb: canControl ? 0 : 1,  // Gast kann nicht per Tastatur spulen
+        },
         events:{
           onReady: () => { ytReady = true; if(startAt>0) yt.seekTo(startAt,true); if(playNow){ suppressNext=true; yt.playVideo(); } },
           onStateChange: onYtState,
@@ -849,23 +858,34 @@ function loadLinkSource(src, startAt, playNow){
     hideAllPlayers(); playerVim.hidden = false;
     setMode('Vimeo'); overlayChip('VIMEO', 'gold');
     current = {kind:'vimeo', id:src.id, url:src.url};
-    playerVim.src = 'https://player.vimeo.com/video/' + src.id + '?playsinline=1&dnt=1';
+    playerVim.src = 'https://player.vimeo.com/video/' + src.id
+                  + '?playsinline=1&dnt=1'
+                  + (canControl ? '' : '&controls=0&keyboard=0');
     if(vim){ try{ vim.destroy(); }catch(_){} vim = null; }
     vim = new Vimeo.Player(playerVim);
     vim.ready().then(async () => {
       if(startAt>0) await vim.setCurrentTime(startAt);
       if(playNow){ suppressNext = true; await vim.play().catch(()=>{}); }
     });
-    vim.on('play',  () => { if(suppressNext){ suppressNext=false; return; } vim.getCurrentTime().then(t => broadcast({t:'play', time:t, at:Date.now()})); });
-    vim.on('pause', () => { if(suppressNext){ suppressNext=false; return; } vim.getCurrentTime().then(t => broadcast({t:'pause', time:t})); });
-    vim.on('seeked',() => { if(suppressNext){ suppressNext=false; return; } vim.getCurrentTime().then(t => broadcast({t:'seek', time:t})); });
+    // Sync nur vom Host senden — sonst würde ein versehentlicher Gast-Klick die Runde desynchen
+    vim.on('play',  () => { if(suppressNext){ suppressNext=false; return; } if(!isHost) return; vim.getCurrentTime().then(t => broadcast({t:'play', time:t, at:Date.now()})); });
+    vim.on('pause', () => { if(suppressNext){ suppressNext=false; return; } if(!isHost) return; vim.getCurrentTime().then(t => broadcast({t:'pause', time:t})); });
+    vim.on('seeked',() => { if(suppressNext){ suppressNext=false; return; } if(!isHost) return; vim.getCurrentTime().then(t => broadcast({t:'seek', time:t})); });
   }
   else if(src.kind === 'url'){
     hideAllPlayers(); playerVid.hidden = false;
     setMode('Direkt-URL'); overlayChip('MP4', 'gold');
     current = {kind:'url', url:src.url};
+    playerVid.srcObject = null;
     playerVid.src = src.url;
     playerVid.currentTime = startAt || 0;
+    if(canControl){
+      playerVid.controls = true;
+      hideGuestControls();
+    }else{
+      playerVid.controls = false;
+      showGuestControls();
+    }
     if(playNow){ suppressNext=true; playerVid.play().catch(()=>{}); }
     attachVideoEvents(playerVid);
   }
@@ -919,21 +939,24 @@ function callPeerWithStream(peerId){
 }
 
 function attachVideoEvents(v){
-  // Bei Datei-Modus (Host-Stream) müssen Play/Pause/Seek NICHT gebroadcastet werden,
-  // weil der WebRTC-MediaStream selbst synchron läuft.
+  // Bei Datei-/Stream-Modus synchronisiert sich der Live-Stream selbst.
+  // Für URL-Modus (jeder lädt lokal) sendet NUR der Host Sync-Events.
   v.onplay  = () => {
     if(suppressNext){ suppressNext=false; return; }
     if(current?.kind === 'file' || current?.kind === 'stream') return;
+    if(!isHost) return;
     broadcast({t:'play', time:v.currentTime, at:Date.now()});
   };
   v.onpause = () => {
     if(suppressNext){ suppressNext=false; return; }
     if(current?.kind === 'file' || current?.kind === 'stream') return;
+    if(!isHost) return;
     broadcast({t:'pause', time:v.currentTime});
   };
   v.onseeked= () => {
     if(suppressNext){ suppressNext=false; return; }
     if(current?.kind === 'file' || current?.kind === 'stream') return;
+    if(!isHost) return;
     broadcast({t:'seek', time:v.currentTime});
   };
   v.ontimeupdate = () => { $('progressText').textContent = fmtTime(v.currentTime) + ' / ' + fmtTime(v.duration||0); };
@@ -969,6 +992,8 @@ function showYtError(code, id){
 function onYtState(e){
   if(!ytReady || !current || current.kind!=='yt') return;
   if(suppressNext){ suppressNext=false; return; }
+  // Sync nur vom Host senden
+  if(!isHost) return;
   if(e.data === YT.PlayerState.PLAYING) broadcast({t:'play', time:yt.getCurrentTime(), at:Date.now()});
   else if(e.data === YT.PlayerState.PAUSED) broadcast({t:'pause', time:yt.getCurrentTime()});
 }
@@ -1098,6 +1123,7 @@ function renderMarkers(){
       el.style.left = pct + '%';
       el.addEventListener('click', (e) => {
         e.stopPropagation();
+        if(!isHost){ toast('Nur der Gastgeber kann zur Marker-Stelle springen.'); return; }
         jumpTo(m.time);
       });
       const tip = document.createElement('div');
@@ -1112,9 +1138,10 @@ function renderMarkers(){
   });
 }
 
-// Klick auf Timeline → zur Zeit springen (nur Host für Datei; alle für YT/Vimeo)
+// Klick auf Timeline → zur Zeit springen. NUR Host darf springen.
 $('timeline').addEventListener('click', async (e) => {
   if(e.target.classList.contains('tl-marker') || e.target.closest('.tl-marker')) return;
+  if(!isHost){ toast('Nur der Gastgeber kann vor- und zurückspulen.'); return; }
   const rect = $('timeline').getBoundingClientRect();
   const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
   const d = await getLocalDuration();
@@ -1249,7 +1276,7 @@ function handleMessage(m, conn){
     case 'leave': addMsg('', (m.from||'Jemand') + ' hat den Raum verlassen.', true); return;
     case 'src':
       if(m.src && m.src.kind){
-        loadLinkSource(m.src, Number(m.time)||0, false);
+        loadLinkSource(m.src, Number(m.time)||0, false, false); // asHost = false (Gast)
         addMsg('', (m.from||'Gastgeber') + ' hat eine Quelle geladen.', true);
       }
       return;
