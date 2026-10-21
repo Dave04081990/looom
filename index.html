@@ -718,6 +718,12 @@ const APP_PREFIX = _slug ? 'looom-' + _slug : 'looom';
 // weiter unten liegende const-Deklarationen die TDZ verlassen.
 const ROOM_HOST_ID = () => APP_PREFIX + '-host-' + room;
 
+// Peer-State ebenfalls vorziehen, damit UI-Handler oben darauf zugreifen können.
+let peer = null;
+let isHost = false;
+let hostConn = null;
+const peers = new Map();
+
 function toast(msg, ms=1800){
   const el = $('toast'); el.textContent = msg; el.classList.add('show');
   clearTimeout(toast._t); toast._t = setTimeout(()=> el.classList.remove('show'), ms);
@@ -1412,8 +1418,7 @@ $('pbChat').classList.add('active');
 updatePlayButtonState();
 updatePbMuteIcon();
 
-let peer=null, isHost=false, hostConn=null;
-const peers = new Map();
+// isHost, peer, peers etc. werden ganz oben vorgezogen (TDZ-Vermeidung).
 const CHUNK = 48 * 1024;
 
 function peerCount(){ return isHost ? peers.size : (hostConn && hostConn.open ? 1 : 0); }
