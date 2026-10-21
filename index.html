@@ -327,22 +327,71 @@
   .room.cinema .sharebar{display:none}
 
   /* Chat-Toggle (unabhängig von Kino-Modus) */
-  .room.chat-off .playspace{grid-template-columns:1fr}
-  .room.chat-off .chat{display:none}
+  .playspace.chat-off{grid-template-columns:1fr}
+  .playspace.chat-off .chat{display:none}
 
-  /* Vollbild: playspace füllt den Bildschirm. Steuerleiste + Timeline bleiben sichtbar.
-     Chat sitzt wie gewohnt rechts; über den Chat-Button kann er zugeklappt werden. */
-  .playspace:fullscreen{
-    background:var(--bg);
-    padding:12px 16px;
-    gap:12px;
-    grid-template-rows:1fr;
+  /* Vollbild: Player füllt den gesamten Screen. Steuerleiste + Timeline
+     schweben als transparentes Overlay unten rein und faden bei Mausinaktivität aus.
+     Chat ist default aus — über die Sprechblase kann er als rechte Spalte reinkommen. */
+  .playspace:fullscreen,
+  .playspace:-webkit-full-screen{
+    background:#000;
+    padding:0;gap:0;
+    grid-template-columns:1fr !important;
     width:100vw;height:100vh;
     overflow:hidden;
+    position:relative;
   }
-  .playspace:-webkit-full-screen{
-    background:var(--bg);padding:12px 16px;width:100vw;height:100vh;
+  .playspace:fullscreen .playercol{
+    position:relative;width:100%;height:100%;gap:0;
   }
+  .playspace:fullscreen .player-wrap{
+    position:absolute;inset:0;
+    aspect-ratio:unset;width:100%;height:100%;
+    border:0;border-radius:0;
+  }
+  .playspace:fullscreen .player-bar{
+    position:absolute;left:0;right:0;bottom:0;z-index:5;
+    background:linear-gradient(to top, rgba(0,0,0,.85) 10%, rgba(0,0,0,.4) 60%, rgba(0,0,0,0));
+    border:0;border-radius:0;
+    padding:60px 32px 18px;
+    transition:opacity .3s ease, transform .3s ease;
+  }
+  .playspace:fullscreen .player-bar .pb-btn{
+    background:rgba(20,20,20,.75);border-color:rgba(255,255,255,.12);
+    backdrop-filter:blur(8px);
+  }
+  .playspace:fullscreen .player-bar .pb-btn:hover:not([disabled]){
+    background:rgba(30,30,30,.9);border-color:var(--gold-soft);
+  }
+  .playspace:fullscreen .timeline-wrap{
+    position:absolute;left:0;right:0;bottom:70px;z-index:4;
+    background:transparent;border:0;border-radius:0;
+    padding:0 32px 10px;
+    transition:opacity .3s ease, transform .3s ease;
+  }
+  .playspace:fullscreen .timeline-wrap .timeline-hint{
+    display:none;
+  }
+  .playspace:fullscreen .timeline-wrap .progress{
+    color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9);
+  }
+  .playspace:fullscreen.hide-controls .player-bar,
+  .playspace:fullscreen.hide-controls .timeline-wrap{
+    opacity:0;transform:translateY(8px);pointer-events:none;
+  }
+  .playspace:fullscreen .chat{
+    display:none;
+    position:absolute;right:0;top:0;bottom:0;width:360px;z-index:6;
+    border:0;border-radius:0;border-left:1px solid var(--line);
+    background:rgba(10,10,10,.9);backdrop-filter:blur(10px);
+  }
+  .playspace:fullscreen:not(.chat-off) .chat{display:flex}
+
+  /* Timeline-Zeile mit Zeitangabe */
+  .tl-row{display:flex;align-items:center;gap:12px}
+  .tl-row .timeline{flex:1}
+  .tl-row .progress{flex:none;font-family:var(--f-mono);font-size:12px;color:var(--fg-dim);min-width:110px;text-align:right}
 
   /* Transfer-Bar wird nicht mehr benötigt — ersetzt durch Live-Streaming. */
   .xfer{display:none !important}
@@ -608,11 +657,6 @@
           <span id="xferPct">0%</span>
         </div>
 
-        <div class="player-controls">
-          <span class="mode-pill">Modus · <b id="modeLabel">—</b></span>
-          <span class="progress" id="progressText">00:00 / 00:00</span>
-        </div>
-
         <div class="player-bar" id="playerBar">
           <button class="pb-btn" id="pbPlay" title="Play / Pause" aria-label="Play / Pause">
             <svg viewBox="0 0 24 24" fill="currentColor"><g id="pbPlayIcon"><polygon points="7,5 20,12 7,19"/></g><g id="pbPauseIcon" style="display:none"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></g></svg>
@@ -648,9 +692,12 @@
         </div>
 
         <div class="timeline-wrap">
-          <div class="timeline" id="timeline" title="Klick für Zeitangabe · V für Kommentar">
-            <div class="tl-fill" id="tlFill"></div>
-            <div class="tl-playhead" id="tlPlayhead" style="left:0"></div>
+          <div class="tl-row">
+            <div class="timeline" id="timeline" title="Klick für Zeitangabe · V für Kommentar">
+              <div class="tl-fill" id="tlFill"></div>
+              <div class="tl-playhead" id="tlPlayhead" style="left:0"></div>
+            </div>
+            <span class="progress" id="progressText">00:00 / 00:00</span>
           </div>
           <div class="timeline-hint">
             <kbd>V</kbd> drücken, um einen Kommentar an aktueller Stelle zu setzen · hover zeigt Kommentar
@@ -1406,13 +1453,45 @@ document.addEventListener('fullscreenchange', () => {
 
 // --- Chat ein-/ausklappen -------------------------------------------------
 $('pbChat').addEventListener('click', () => {
-  const room = $('roomView');
-  const off = !room.classList.contains('chat-off');
-  room.classList.toggle('chat-off', off);
-  $('pbChat').classList.toggle('active', !off); // "aktiv" = Chat ist AN
+  const ps = document.querySelector('.playspace');
+  const nowOff = !ps.classList.contains('chat-off');
+  ps.classList.toggle('chat-off', nowOff);
+  $('pbChat').classList.toggle('active', !nowOff); // active = Chat ist AN
 });
-// initial: Chat an → Button nicht active, aber auch nicht ausgegraut
-$('pbChat').classList.add('active');
+$('pbChat').classList.add('active'); // Start: Chat ist AN
+
+// --- Auto-Hide der Overlay-Steuerung im Vollbild --------------------------
+let _hideTimer = null;
+function kickControls(){
+  const ps = document.querySelector('.playspace');
+  if(!ps) return;
+  ps.classList.remove('hide-controls');
+  clearTimeout(_hideTimer);
+  _hideTimer = setTimeout(() => {
+    if(document.fullscreenElement) ps.classList.add('hide-controls');
+  }, 2500);
+}
+['mousemove', 'touchstart', 'keydown'].forEach(ev => {
+  document.addEventListener(ev, () => {
+    if(document.fullscreenElement) kickControls();
+  });
+});
+
+// Beim Enter-Fullscreen: Chat zuklappen; beim Exit: Chat wieder einblenden
+document.addEventListener('fullscreenchange', () => {
+  const ps = document.querySelector('.playspace');
+  if(!ps) return;
+  if(document.fullscreenElement){
+    ps.classList.add('chat-off');
+    $('pbChat').classList.remove('active');
+    kickControls();
+  }else{
+    ps.classList.remove('chat-off');
+    ps.classList.remove('hide-controls');
+    $('pbChat').classList.add('active');
+    clearTimeout(_hideTimer);
+  }
+});
 
 // Initialer Button-Zustand
 updatePlayButtonState();
