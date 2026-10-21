@@ -317,6 +317,37 @@
   .player-bar .pb-btn.active{background:var(--gold);color:var(--gold-ink);border-color:var(--gold)}
   .player-bar .pb-btn[disabled]{opacity:.35;cursor:not-allowed}
   .player-bar .pb-btn svg{width:18px;height:18px;display:block}
+  /* Chat-Benachrichtigungs-Dot */
+  .pb-btn.unread{position:relative}
+  .pb-btn.unread::after{
+    content:"";position:absolute;top:6px;right:6px;
+    width:9px;height:9px;border-radius:50%;background:var(--gold);
+    box-shadow:0 0 0 2px var(--panel);
+    animation:lo-pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes lo-pulse{
+    0%,100%{box-shadow:0 0 0 2px var(--panel), 0 0 0 0 rgba(201,165,103,.6)}
+    50%    {box-shadow:0 0 0 2px var(--panel), 0 0 0 7px rgba(201,165,103,0)}
+  }
+  .playspace:fullscreen .pb-btn.unread::after{
+    box-shadow:0 0 0 2px rgba(20,20,20,.75);
+  }
+  @keyframes lo-pulse-fs{
+    0%,100%{box-shadow:0 0 0 2px rgba(20,20,20,.75), 0 0 0 0 rgba(201,165,103,.6)}
+    50%    {box-shadow:0 0 0 2px rgba(20,20,20,.75), 0 0 0 7px rgba(201,165,103,0)}
+  }
+  .playspace:fullscreen .pb-btn.unread::after{animation-name:lo-pulse-fs}
+
+  /* Chat-Close-Button im Chat-Header */
+  .chat-close{
+    background:transparent;border:0;cursor:pointer;
+    width:28px;height:28px;border-radius:50%;
+    display:inline-flex;align-items:center;justify-content:center;
+    color:var(--fg-dim);transition:background .15s, color .15s;
+    margin-left:8px;flex:none;
+  }
+  .chat-close:hover{background:var(--panel-2);color:var(--gold)}
+  .chat-close svg{width:14px;height:14px}
   .player-bar .pb-spacer{flex:1}
   .host-only{display:none !important}
   body.is-host .host-only{display:inline-flex !important}
@@ -363,6 +394,13 @@
   }
   .playspace:fullscreen .player-bar .pb-btn:hover:not([disabled]){
     background:rgba(30,30,30,.9);border-color:var(--gold-soft);
+  }
+  /* active-Zustand muss auch im Vollbild gewinnen (höhere Spezifität) */
+  .playspace:fullscreen .player-bar .pb-btn.active{
+    background:var(--gold);color:var(--gold-ink);border-color:var(--gold);
+  }
+  .playspace:fullscreen .player-bar .pb-btn.active:hover:not([disabled]){
+    background:var(--gold);border-color:var(--gold);filter:brightness(1.08);
   }
   .playspace:fullscreen .timeline-wrap{
     position:absolute;left:0;right:0;bottom:70px;z-index:4;
@@ -709,6 +747,12 @@
         <header>
           <div class="label"><span class="slash">/</span> Chat</div>
           <div class="peers"><b id="peerCount">0</b> im Raum</div>
+          <button class="chat-close" id="chatClose" title="Chat zuklappen" aria-label="Chat zuklappen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+              <line x1="6" y1="6" x2="18" y2="18"/>
+              <line x1="18" y1="6" x2="6" y2="18"/>
+            </svg>
+          </button>
         </header>
         <div class="messages" id="messages" aria-live="polite"></div>
         <form class="composer" id="chatForm" autocomplete="off">
@@ -1452,13 +1496,29 @@ document.addEventListener('fullscreenchange', () => {
 });
 
 // --- Chat ein-/ausklappen -------------------------------------------------
+function setChatOpen(open){
+  const ps = document.querySelector('.playspace');
+  ps.classList.toggle('chat-off', !open);
+  $('pbChat').classList.toggle('active', open);
+  if(open) clearChatUnread();
+}
 $('pbChat').addEventListener('click', () => {
   const ps = document.querySelector('.playspace');
-  const nowOff = !ps.classList.contains('chat-off');
-  ps.classList.toggle('chat-off', nowOff);
-  $('pbChat').classList.toggle('active', !nowOff); // active = Chat ist AN
+  const open = ps.classList.contains('chat-off'); // war aus → jetzt aufmachen
+  setChatOpen(open);
 });
 $('pbChat').classList.add('active'); // Start: Chat ist AN
+
+// Zuklapp-Button im Chat-Header
+$('chatClose').addEventListener('click', () => setChatOpen(false));
+
+// Chat-Benachrichtigungs-Dot
+function showChatUnread(){
+  // Nur anzeigen, wenn Chat gerade zugeklappt oder im Vollbild versteckt ist
+  const ps = document.querySelector('.playspace');
+  if(ps.classList.contains('chat-off')) $('pbChat').classList.add('unread');
+}
+function clearChatUnread(){ $('pbChat').classList.remove('unread'); }
 
 // --- Auto-Hide der Overlay-Steuerung im Vollbild --------------------------
 let _hideTimer = null;
@@ -1827,6 +1887,10 @@ function addMsg(name, text, system=false){
   row.appendChild(t);
   msgsEl.appendChild(row);
   msgsEl.scrollTop = msgsEl.scrollHeight;
+  // Benachrichtigung, wenn Nachricht nicht von mir ist UND Chat zugeklappt ist
+  if(!system && name && name !== (me?.name)){
+    showChatUnread();
+  }
 }
 $('chatForm').addEventListener('submit', e => {
   e.preventDefault();
