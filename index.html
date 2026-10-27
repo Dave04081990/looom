@@ -1059,7 +1059,7 @@ function hideAllPlayers(){
   playerVid.hidden = true;
   if(playerVid.src){ try{ playerVid.pause(); }catch(_){} }
 }
-function setMode(m){ $('modeLabel').textContent = m; }
+function setMode(m){ const el = $('modeLabel'); if(el) el.textContent = m; }
 function overlayChip(txt, variant){
   overlayStatus.innerHTML = '';
   if(!txt) return;
