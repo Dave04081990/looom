@@ -1061,6 +1061,7 @@ function hideAllPlayers(){
 }
 function setMode(m){ const el = $('modeLabel'); if(el) el.textContent = m; }
 function overlayChip(txt, variant){
+  if(!overlayStatus) return;
   overlayStatus.innerHTML = '';
   if(!txt) return;
   const c = document.createElement('div');
