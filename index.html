@@ -626,14 +626,15 @@
       <section class="mode" aria-labelledby="m2-title" data-num="02">
         <div class="num">Modus 02</div>
         <h3 id="m2-title">Link teilen</h3>
-        <p>Füge einen YouTube- oder Vimeo-Link ein. Der Player läuft bei jedem lokal, synchron, in voller Qualität.</p>
+        <p>Füge einen Video-Link ein. Der Player läuft bei jedem lokal — in voller Qualität. YouTube und Vimeo laufen synchron, der Rest ohne Sync aber mit Chat und Kommentar-Markern.</p>
         <ul>
-          <li>YouTube</li>
-          <li>Vimeo</li>
-          <li>MP4-URL</li>
+          <li>YouTube · Vimeo</li>
+          <li>Loom · Twitch · Dailymotion</li>
+          <li>Streamable · Wistia · Drive</li>
+          <li>MP4 / WebM / MOV</li>
         </ul>
         <div class="action">
-          <input type="url" id="linkInput" placeholder="youtube.com/watch?v=… · vimeo.com/…">
+          <input type="url" id="linkInput" placeholder="youtube.com/… · vimeo.com/… · loom.com/… · twitch.tv/… · mp4-URL …">
         </div>
         <div class="action">
           <button class="btn primary" id="startLinkBtn">Raum starten</button>
@@ -927,21 +928,117 @@ window.addEventListener('hashchange', () => location.reload());
 
 function parseLink(s){
   s = s.trim();
+  if(!s) return null;
+
+  // Erlaubt auch, dass jemand einen kompletten iframe-HTML-Snippet pastet
+  const ifr = s.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+  if(ifr) s = ifr[1];
+
+  // Nackte 11-stellige YouTube-ID
   if(/^[a-zA-Z0-9_-]{11}$/.test(s)) return {kind:'yt', id:s};
+
   try{
     const u = new URL(/^https?:\/\//.test(s) ? s : 'https://'+s);
-    const h = u.hostname.replace(/^www\./,'');
-    if(h.includes('youtu.be')) return {kind:'yt', id:u.pathname.slice(1,12)};
-    if(h.includes('youtube.com')){
-      if(u.pathname === '/watch'){ const v = u.searchParams.get('v'); if(v) return {kind:'yt', id:v}; }
-      const m = u.pathname.match(/\/(embed|shorts|live)\/([a-zA-Z0-9_-]{11})/);
+    const h = u.hostname.replace(/^www\./,'').toLowerCase();
+    const p = u.pathname;
+
+    // --- YouTube (volle Sync-API) ---
+    if(h === 'youtu.be') return {kind:'yt', id:p.slice(1,12)};
+    if(h.endsWith('youtube.com') || h.endsWith('youtube-nocookie.com')){
+      if(p === '/watch'){ const v = u.searchParams.get('v'); if(v) return {kind:'yt', id:v}; }
+      const m = p.match(/\/(embed|shorts|live|v)\/([a-zA-Z0-9_-]{11})/);
       if(m) return {kind:'yt', id:m[2]};
     }
-    if(h.includes('vimeo.com')){
-      const id = (u.pathname.match(/\/(\d+)/)||[])[1];
+
+    // --- Vimeo (volle Sync-API) ---
+    if(h.endsWith('vimeo.com')){
+      const id = (p.match(/\/(\d+)/)||[])[1];
       if(id) return {kind:'vimeo', id, url:u.toString()};
     }
-    if(/\.(mp4|webm|mov|m4v|ogv)(\?|$)/i.test(u.pathname)) return {kind:'url', url:u.toString()};
+    if(h === 'player.vimeo.com'){
+      const id = (p.match(/\/video\/(\d+)/)||[])[1];
+      if(id) return {kind:'vimeo', id, url:'https://vimeo.com/'+id};
+    }
+
+    // --- Loom (Screen-Recording, Embed per /embed/ID) ---
+    if(h.endsWith('loom.com')){
+      const id = (p.match(/\/(share|embed)\/([a-f0-9]{20,})/)||[])[2];
+      if(id) return {kind:'embed', url:'https://www.loom.com/embed/'+id, label:'Loom'};
+    }
+
+    // --- Twitch (Clips, VOD, Kanäle) ---
+    if(h.endsWith('twitch.tv')){
+      const parent = location.hostname;
+      let m;
+      if((m = p.match(/\/videos\/(\d+)/))) return {kind:'embed', url:`https://player.twitch.tv/?video=${m[1]}&parent=${parent}&autoplay=false`, label:'Twitch'};
+      if((m = p.match(/^\/([a-zA-Z0-9_]+)\/clip\/([A-Za-z0-9_-]+)/))) return {kind:'embed', url:`https://clips.twitch.tv/embed?clip=${m[2]}&parent=${parent}`, label:'Twitch Clip'};
+      if((m = p.match(/^\/([a-zA-Z0-9_]+)\/?$/))) return {kind:'embed', url:`https://player.twitch.tv/?channel=${m[1]}&parent=${parent}&autoplay=false`, label:'Twitch Live'};
+    }
+    if(h === 'clips.twitch.tv'){
+      const id = p.slice(1);
+      if(id) return {kind:'embed', url:`https://clips.twitch.tv/embed?clip=${id}&parent=${location.hostname}`, label:'Twitch Clip'};
+    }
+
+    // --- Dailymotion ---
+    if(h === 'dai.ly'){
+      return {kind:'embed', url:'https://www.dailymotion.com/embed/video/'+p.slice(1), label:'Dailymotion'};
+    }
+    if(h.endsWith('dailymotion.com')){
+      const id = (p.match(/\/video\/([a-zA-Z0-9]+)/)||[])[1];
+      if(id) return {kind:'embed', url:'https://www.dailymotion.com/embed/video/'+id, label:'Dailymotion'};
+    }
+
+    // --- Streamable ---
+    if(h.endsWith('streamable.com')){
+      const id = p.replace(/^\/(e\/)?/, '').split('/')[0];
+      if(id) return {kind:'embed', url:'https://streamable.com/e/'+id, label:'Streamable'};
+    }
+
+    // --- Wistia (fast.wistia / wistia share links) ---
+    if(h.includes('wistia')){
+      const id = (p.match(/(?:medias|embed\/iframe)\/([a-zA-Z0-9]+)/)||[])[1]
+              || (p.match(/\/([a-zA-Z0-9]{10,})/)||[])[1];
+      if(id) return {kind:'embed', url:'https://fast.wistia.net/embed/iframe/'+id, label:'Wistia'};
+    }
+
+    // --- Google Drive (Dateien per Preview) ---
+    if(h === 'drive.google.com'){
+      const id = (p.match(/\/file\/d\/([^/]+)/)||[])[1] || u.searchParams.get('id');
+      if(id) return {kind:'embed', url:'https://drive.google.com/file/d/'+id+'/preview', label:'Google Drive'};
+    }
+
+    // --- Dropbox-Direktlink (?raw=1 lässt den Browser das Video streamen) ---
+    if(h.endsWith('dropbox.com') || h === 'dl.dropboxusercontent.com'){
+      if(/\.(mp4|webm|mov|m4v|ogv)$/i.test(p)){
+        const direct = u.toString().replace(/[?&]dl=\d/,'') + (u.search ? '&' : '?') + 'raw=1';
+        return {kind:'url', url:direct};
+      }
+    }
+
+    // --- Facebook Watch ---
+    if(h.endsWith('facebook.com') || h === 'fb.watch'){
+      return {kind:'embed', url:'https://www.facebook.com/plugins/video.php?href=' + encodeURIComponent(u.toString()) + '&show_text=false', label:'Facebook'};
+    }
+
+    // --- TikTok ---
+    if(h.endsWith('tiktok.com')){
+      const id = (p.match(/\/video\/(\d+)/)||[])[1];
+      if(id) return {kind:'embed', url:'https://www.tiktok.com/embed/v2/'+id, label:'TikTok'};
+    }
+
+    // --- Instagram Reels / Posts ---
+    if(h.endsWith('instagram.com')){
+      const m = p.match(/\/(reel|p|tv)\/([^/]+)/);
+      if(m) return {kind:'embed', url:'https://www.instagram.com/'+m[1]+'/'+m[2]+'/embed', label:'Instagram'};
+    }
+
+    // --- Direktes Video-File (MP4, WebM, MOV …) ---
+    if(/\.(mp4|webm|mov|m4v|ogv|m3u8|mpd)(\?|$)/i.test(p)) return {kind:'url', url:u.toString()};
+
+    // --- Alles andere: generischer iframe-Versuch ---
+    // Nur https akzeptieren (http wird vom Browser bei HTTPS-Seiten geblockt)
+    if(u.protocol === 'https:') return {kind:'embed', url:u.toString(), label: h};
+
   }catch(_){}
   return null;
 }
@@ -1046,6 +1143,19 @@ function loadLinkSource(src, startAt, playNow, asHost){
     }
     if(playNow){ suppressNext=true; playerVid.play().catch(()=>{}); }
     attachVideoEvents(playerVid);
+  }
+  else if(src.kind === 'embed'){
+    // Generischer iframe-Modus für Loom, Twitch, Dailymotion, Streamable, Wistia,
+    // Facebook, TikTok, Instagram, Google Drive und alle anderen https-Embeds.
+    // Keine Sync-API verfügbar — jeder steuert selbst, Chat und Marker funktionieren.
+    hideAllPlayers(); playerVim.hidden = false;
+    setMode(src.label || 'Embed'); overlayChip((src.label || 'EMBED').toUpperCase(), 'gold');
+    current = {kind:'embed', url:src.url, label:src.label};
+    if(vim){ try{ vim.destroy(); }catch(_){} vim = null; }
+    playerVim.setAttribute('allow','autoplay; fullscreen; picture-in-picture; encrypted-media');
+    playerVim.setAttribute('allowfullscreen','');
+    playerVim.src = src.url;
+    addMsg('', 'Externer Player — jeder Teilnehmer steuert selbst. Chat und Kommentar-Marker funktionieren, Play/Pause werden nicht synchronisiert.', true);
   }
 }
 
@@ -1772,10 +1882,11 @@ function setupHost(){
   });
 }
 function toSrcPayload(){
-  if(!current || current.kind === 'file') return null;
+  if(!current || current.kind === 'file' || current.kind === 'stream') return null;
   if(current.kind === 'yt') return {kind:'yt', id:current.id};
   if(current.kind === 'vimeo') return {kind:'vimeo', id:current.id, url:current.url};
   if(current.kind === 'url') return {kind:'url', url:current.url};
+  if(current.kind === 'embed') return {kind:'embed', url:current.url, label:current.label};
   return null;
 }
 
